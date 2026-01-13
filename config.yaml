@@ -1,0 +1,25 @@
+input_file: "final_kpi_weekly_reduced.csv"
+total_budget: 5000000
+brands: ["bb", "mac", "tf"]
+offline_prefixes: ["m3_ooh", "m3_partnership", "m3_tv", "m3_vod"]
+exclude_channels: ["m1_social_bb_sp"]
+
+iterations: 1000
+param_ranges:
+  decay: [0.1, 0.8]
+  S: [0.8, 2.5]
+
+ridge_alpha: 2.0
+control_alpha_ratio: 0.1
+search_penalty_factor: 5.0
+
+output_dir: "outputs"
+
+# NEW: default optimisation mode ("revenue" or "profit")
+optimization_mode: "revenue"
+
+# NEW: per-brand profit margins (as decimals)
+profit_margin:
+  bb: 0.35   # 35%
+  mac: 0.40  # 40%
+  tf: 0.30   # 30%
