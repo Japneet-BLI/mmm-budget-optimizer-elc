@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import yaml
+import os
 
 from data_prep import load_and_prep_data, group_sparse_channels
 from model import OptimizedMMM
@@ -556,6 +557,102 @@ def main() -> None:
         revenue_chart = make_revenue_chart(brand_summary)
         st.altair_chart(revenue_chart, use_container_width=True)
 
+
+    # # --------- TABLE GUARDRAILS ----------
+    def build_guardrail_table(
+        brand_summary: pd.DataFrame,
+        brand_min_mult: Dict[str, float],
+        brand_max_mult: Dict[str, float],
+    ) -> pd.DataFrame:
+
+        rows = []
+
+        for _, row in brand_summary.iterrows():
+            brand = row["Brand"]
+            hist_spend = row["Hist_Spend"]
+
+            min_mult = brand_min_mult.get(brand, np.nan)
+            max_mult = brand_max_mult.get(brand, np.nan)
+
+            rows.append(
+                {
+                    "Brand": row["Brand_Display"],
+                    "Historical Spend (£)": hist_spend,
+                    "Min Multiplier": min_mult,
+                    "Max Multiplier": max_mult,
+                    "Min Allowed Budget (£)": hist_spend * min_mult,
+                    "Max Allowed Budget (£)": hist_spend * max_mult,
+                }
+            )
+
+        return pd.DataFrame(rows)
+    
+    # st.markdown("---")
+    # st.subheader("Brand Budget Guardrails Summary")
+
+    # guardrail_df = build_guardrail_table(
+    #     brand_summary,
+    #     brand_min_mult,
+    #     brand_max_mult,
+    # )
+
+    # display_df = guardrail_df.copy()
+    # for col in [
+    #     "Historical Spend (£)",
+    #     "Min Allowed Budget (£)",
+    #     "Max Allowed Budget (£)",
+    # ]:
+    #     display_df[col] = display_df[col].apply(format_currency)
+    
+    # styled_df = (
+    #     display_df.style
+    #     .set_properties(**{"text-align": "left"})
+    #     .set_table_styles(
+    #         [
+    #             {"selector": "th", "props": [("text-align", "left")]},
+    #             {"selector": "td", "props": [("text-align", "left")]},
+    #         ]
+    #     )
+    # )
+
+
+    # st.dataframe(display_df, use_container_width=True)
+
+    # --------- TABLE GUARDRAILS ----------
+    with st.expander("Show brand budget guardrails"):
+        # st.subheader("Brand Budget Guardrails Summary")
+
+        guardrail_df = build_guardrail_table(
+            brand_summary,
+            brand_min_mult,
+            brand_max_mult,
+        )
+
+        display_df = guardrail_df.copy()
+
+        # Format currency columns
+        for col in ["Historical Spend (£)", "Min Allowed Budget (£)", "Max Allowed Budget (£)"]:
+            display_df[col] = display_df[col].apply(format_currency)
+
+        # Round multipliers nicely
+        display_df["Min Multiplier"] = display_df["Min Multiplier"].round(2)
+        display_df["Max Multiplier"] = display_df["Max Multiplier"].round(2)
+
+        # Set column order
+        display_df = display_df[
+            [
+                "Brand",
+                "Historical Spend (£)",
+                "Min Multiplier",
+                "Max Multiplier",
+                "Min Allowed Budget (£)",
+                "Max Allowed Budget (£)",
+            ]
+        ]
+
+        # Display table
+        st.dataframe(display_df, use_container_width=True)
+
     # --------- DATA TABLE ----------
     with st.expander("Show brand-level table"):
         table_df = brand_summary.copy()
@@ -583,6 +680,22 @@ def main() -> None:
         ].rename(columns={"Brand_Display": "Brand"})
 
         st.dataframe(table_df, use_container_width=True)
+
+    # ----------- Saturation curves ---------
+    st.markdown("---")
+    st.subheader("Saturation Curves (Response vs Spend)")
+
+    st.caption(
+        "These curves illustrate diminishing returns for each channel and brand. "
+        "Flatter sections indicate limited incremental revenue at higher spend levels."
+    )
+
+    img_path = os.path.join(output_dir, "saturation_curves.png")
+
+    if os.path.exists(img_path):
+        st.image(img_path,width=1000)
+    else:
+        st.info("Saturation curves image not available.")
 
 
 if __name__ == "__main__":

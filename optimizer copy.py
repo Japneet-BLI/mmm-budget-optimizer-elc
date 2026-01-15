@@ -94,6 +94,8 @@ def _optimize_brand_budgets(
     brand_hist_totals: Dict[str, float],
     mode: str = "revenue",
     profit_margins: Dict[str, float] | None = None,
+    brand_min_mult: Dict[str, float] | None = None,
+    brand_max_mult: Dict[str, float] | None = None,
 ) -> Dict[str, float]:
     """
     Stage 1: brand-level optimization of annual budgets B_b.
@@ -139,7 +141,30 @@ def _optimize_brand_budgets(
         init_shares = np.ones(n_brands, dtype=float) / n_brands
 
     x0 = init_shares * total_budget
-    bounds = [(0.0, None)] * n_brands
+    bounds = []
+
+
+    for b in brands:
+        hist = brand_hist_totals.get(b, 0.0)
+
+        if hist > 0:
+            lb = hist * (brand_min_mult.get(b, 0.0) if brand_min_mult else 0.0)
+            ub = hist * (brand_max_mult.get(b, np.inf) if brand_max_mult else np.inf)
+        else:
+            lb, ub = 0.0, np.inf
+
+        bounds.append((lb, ub))
+
+    # ---- Safety check ----
+    min_required = sum(lb for lb, _ in bounds)
+
+    if min_required > total_budget:
+        raise ValueError(
+            f"Infeasible constraints: min required budget "
+            f"{min_required:.2f} exceeds total budget {total_budget:.2f}"
+        )
+
+    # bounds = [(0.0, None)] * n_brands
 
     def objective(B: np.ndarray) -> float:
         """
@@ -276,6 +301,7 @@ def _optimize_within_brand(
     return weekly_spends
 
 
+
 def optimize_budget(
     models: Dict[str, object],
     df: pd.DataFrame,
@@ -285,6 +311,8 @@ def optimize_budget(
     profit_margins: Dict[str, float] | None = None,
     alpha_min: float = 0.2,
     alpha_max: float = 2.5,
+    brand_min_mult: Dict[str, float] | None = None,
+    brand_max_mult: Dict[str, float] | None = None,
 ) -> Tuple[pd.DataFrame, np.ndarray, Dict[int, Tuple[str, str]]]:
     """
     Two-stage budget optimization entry point.
@@ -341,6 +369,8 @@ def optimize_budget(
         brand_hist_totals=brand_hist_totals,
         mode=mode,
         profit_margins=profit_margins,
+        brand_min_mult=brand_min_mult,
+        brand_max_mult=brand_max_mult,
     )
 
     # -----------------------------------
