@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import yaml
+import os
 
 from data_prep import load_and_prep_data, group_sparse_channels
 from model import OptimizedMMM
@@ -394,8 +395,6 @@ def main() -> None:
         result = st.session_state["last_result"]
         opt_mode = st.session_state.get("last_mode", opt_mode)
         profit_margins = st.session_state.get("last_margins", profit_margins)
-        fig_curves = st.session_state.get("fig_curves", None)
-        channel_summary_df = st.session_state.get("channel_summary_df", pd.DataFrame())
     elif total_budget <= 0:
         st.info("Set a positive total budget and click **Run Optimization**.")
         return
@@ -428,11 +427,11 @@ def main() -> None:
 
             plot_budget_pies(res_df, brands, output_dir)
             plot_spend_comparison(res_df, output_dir)
-            fig_curves = plot_saturation_curves(df, models, brands, x_opt, channel_map, output_dir)
+            plot_saturation_curves(df, models, brands, x_opt, channel_map, output_dir)
             full_decomp_df = build_and_plot_revenue_decomposition(
                 df, models, brands, x_opt, channel_map, output_dir
             )
-            channel_summary_df = save_allocation_summary(
+            save_allocation_summary(
                 res_df,
                 full_decomp_df,
                 output_dir,
@@ -448,8 +447,6 @@ def main() -> None:
             st.session_state["last_result"] = result
             st.session_state["last_mode"] = opt_mode
             st.session_state["last_margins"] = profit_margins
-            st.session_state["fig_curves"] = fig_curves
-            st.session_state["channel_summary_df"] = channel_summary_df
 
     res_df = result["res_df"]
     brand_summary = result["brand_summary"]
@@ -560,100 +557,145 @@ def main() -> None:
         revenue_chart = make_revenue_chart(brand_summary)
         st.altair_chart(revenue_chart, use_container_width=True)
 
-    # --------- SATURATION CURVES ----------
-    if fig_curves:
-        st.markdown("---")
-        st.markdown("#### Saturation Curves (Response vs Spend)")
-        st.markdown(
-            "These curves show the relationship between weekly spend (x-axis) and revenue (y-axis). "
-            "The <span style='color:blue'>**Blue Dot**</span> is historical average, and the <span style='color:red'>**Red Dot**</span> is the optimized level.",
-            unsafe_allow_html=True
+
+    # # --------- TABLE GUARDRAILS ----------
+    def build_guardrail_table(
+        brand_summary: pd.DataFrame,
+        brand_min_mult: Dict[str, float],
+        brand_max_mult: Dict[str, float],
+    ) -> pd.DataFrame:
+
+        rows = []
+
+        for _, row in brand_summary.iterrows():
+            brand = row["Brand"]
+            hist_spend = row["Hist_Spend"]
+
+            min_mult = brand_min_mult.get(brand, np.nan)
+            max_mult = brand_max_mult.get(brand, np.nan)
+
+            rows.append(
+                {
+                    "Brand": row["Brand_Display"],
+                    "Historical Spend (£)": hist_spend,
+                    "Min Multiplier": min_mult,
+                    "Max Multiplier": max_mult,
+                    "Min Allowed Budget (£)": hist_spend * min_mult,
+                    "Max Allowed Budget (£)": hist_spend * max_mult,
+                }
+            )
+
+        return pd.DataFrame(rows)
+    
+    # st.markdown("---")
+    # st.subheader("Brand Budget Guardrails Summary")
+
+    # guardrail_df = build_guardrail_table(
+    #     brand_summary,
+    #     brand_min_mult,
+    #     brand_max_mult,
+    # )
+
+    # display_df = guardrail_df.copy()
+    # for col in [
+    #     "Historical Spend (£)",
+    #     "Min Allowed Budget (£)",
+    #     "Max Allowed Budget (£)",
+    # ]:
+    #     display_df[col] = display_df[col].apply(format_currency)
+    
+    # styled_df = (
+    #     display_df.style
+    #     .set_properties(**{"text-align": "left"})
+    #     .set_table_styles(
+    #         [
+    #             {"selector": "th", "props": [("text-align", "left")]},
+    #             {"selector": "td", "props": [("text-align", "left")]},
+    #         ]
+    #     )
+    # )
+
+
+    # st.dataframe(display_df, use_container_width=True)
+
+    # --------- TABLE GUARDRAILS ----------
+    with st.expander("Show brand budget guardrails"):
+        # st.subheader("Brand Budget Guardrails Summary")
+
+        guardrail_df = build_guardrail_table(
+            brand_summary,
+            brand_min_mult,
+            brand_max_mult,
         )
-        st.pyplot(fig_curves)
 
-    # --------- CHANNEL DETAILS & GUARDRAILS ----------
-    st.markdown("---")
-    col_details, col_guard = st.columns([2, 1])
+        display_df = guardrail_df.copy()
 
-    with col_details:
-        st.subheader("Channel-Level Performance")
-        if not channel_summary_df.empty:
-            # Format numbers for display
-            disp_df = channel_summary_df.copy()
-            
-            # Helper to safely format currency
-            def safe_fmt(x):
-                return format_currency(float(x)) if pd.notnull(x) else "£0"
+        # Format currency columns
+        for col in ["Historical Spend (£)", "Min Allowed Budget (£)", "Max Allowed Budget (£)"]:
+            display_df[col] = display_df[col].apply(format_currency)
 
-            disp_df["Historical Spend"] = disp_df["Historical_Spend"].apply(safe_fmt)
-            disp_df["Optimized Spend"] = disp_df["Optimized_Spend"].apply(safe_fmt)
-            disp_df["Historical Revenue"] = disp_df["Historical_Revenue"].apply(safe_fmt)
-            disp_df["Optimized Revenue"] = disp_df["Optimized_Revenue"].apply(safe_fmt)
+        # Round multipliers nicely
+        display_df["Min Multiplier"] = display_df["Min Multiplier"].round(2)
+        display_df["Max Multiplier"] = display_df["Max Multiplier"].round(2)
 
-            # Reorder columns
-            cols_to_show = [
-                "Brand", "Channel", 
-                "Historical Spend", "Optimized Spend",
-                "Historical Revenue", "Optimized Revenue"
+        # Set column order
+        display_df = display_df[
+            [
+                "Brand",
+                "Historical Spend (£)",
+                "Min Multiplier",
+                "Max Multiplier",
+                "Min Allowed Budget (£)",
+                "Max Allowed Budget (£)",
             ]
-            st.dataframe(disp_df[cols_to_show], use_container_width=True)
-        else:
-            st.info("Run optimization to see channel details.")
+        ]
 
-    with col_guard:
-        st.subheader("Brand Budget Guardrails")
-        
-        guard_data = []
-        for brand in brands:
-            # Find historical spend from brand_summary
-            match = brand_summary[brand_summary["Brand"] == brand]
-            if not match.empty:
-                hist_val = float(match["Hist_Spend"].iloc[0])
-            else:
-                hist_val = 0.0
-            
-            min_pct = brand_min_mult.get(brand, 0.0)
-            max_pct = brand_max_mult.get(brand, 0.0)
-            
-            min_abs = hist_val * min_pct
-            max_abs = hist_val * max_pct
-            
-            guard_data.append({
-                "Brand": BRAND_DISPLAY_NAMES.get(brand, brand),
-                "Historical": format_currency(hist_val),
-                "Min Limit": format_currency(min_abs),
-                "Max Limit": format_currency(max_abs),
-                "Range": f"{min_pct*100:.0f}% - {max_pct*100:.0f}%"
-            })
-            
-        st.dataframe(pd.DataFrame(guard_data), use_container_width=True)
+        # Display table
+        st.dataframe(display_df, use_container_width=True)
 
-
-    # --------- DATA EXPORT ----------
-    with st.expander("Show full brand-level export table"):
+    # --------- DATA TABLE ----------
+    with st.expander("Show brand-level table"):
         table_df = brand_summary.copy()
-        
-        # Drop the internal 'Brand' code column to avoid collision when renaming 'Brand_Display'
-        if "Brand" in table_df.columns:
-            table_df = table_df.drop(columns=["Brand"])
+        table_df["Historical Spend"] = table_df["Hist_Spend"].apply(format_currency)
+        table_df["Historical Revenue"] = table_df["Hist_Revenue"].apply(
+            format_currency
+        )
+        table_df["Historical Profit"] = table_df["Hist_Profit"].apply(format_currency)
+        table_df["Optimized Spend"] = table_df["Opt_Spend"].apply(format_currency)
+        table_df["Optimized Revenue"] = table_df["Opt_Revenue"].apply(
+            format_currency
+        )
+        table_df["Optimized Profit"] = table_df["Opt_Profit"].apply(format_currency)
 
-        for col in ["Hist_Spend", "Hist_Revenue", "Hist_Profit", "Opt_Spend", "Opt_Revenue", "Opt_Profit"]:
-             table_df[col] = table_df[col].apply(lambda x: format_currency(float(x)))
-             
-        table_df = table_df.rename(columns={
-            "Hist_Spend": "Historical Spend",
-            "Hist_Revenue": "Historical Revenue", 
-            "Hist_Profit": "Historical Profit",
-            "Opt_Spend": "Optimized Spend",
-            "Opt_Revenue": "Optimized Revenue",
-            "Opt_Profit": "Optimized Profit",
-            "Brand_Display": "Brand"
-        })
-        
-        final_cols = ["Brand", "Historical Spend", "Historical Revenue", "Historical Profit", 
-                      "Optimized Spend", "Optimized Revenue", "Optimized Profit"]
-        
-        st.dataframe(table_df[final_cols], use_container_width=True)
+        table_df = table_df[
+            [
+                "Brand_Display",
+                "Historical Spend",
+                "Historical Revenue",
+                "Historical Profit",
+                "Optimized Spend",
+                "Optimized Revenue",
+                "Optimized Profit",
+            ]
+        ].rename(columns={"Brand_Display": "Brand"})
+
+        st.dataframe(table_df, use_container_width=True)
+
+    # ----------- Saturation curves ---------
+    st.markdown("---")
+    st.subheader("Saturation Curves (Response vs Spend)")
+
+    st.caption(
+        "These curves illustrate diminishing returns for each channel and brand. "
+        "Flatter sections indicate limited incremental revenue at higher spend levels."
+    )
+
+    img_path = os.path.join(output_dir, "saturation_curves.png")
+
+    if os.path.exists(img_path):
+        st.image(img_path,width=1000)
+    else:
+        st.info("Saturation curves image not available.")
 
 
 if __name__ == "__main__":
