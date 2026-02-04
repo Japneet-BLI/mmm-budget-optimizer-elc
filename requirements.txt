@@ -1,9 +1,9 @@
-altair
-matplotlib
-numpy
+streamlit
+altair<5
 pandas
+numpy
 PyYAML
 scikit-learn
 scipy
+matplotlib
 seaborn
-streamlit
